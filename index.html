@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html class="dark" lang="en">
 <head>
@@ -210,6 +209,10 @@ textarea.form-input { resize:vertical; min-height:80px; }
     <button onclick="closeDetail()" class="absolute top-4 right-4 z-[110] p-2 rounded-full bg-surface-container-lowest/60 text-on-surface hover:text-primary-container transition-colors hover:bg-surface-container-lowest/90">
       <span class="material-symbols-outlined">close</span>
     </button>
+    <!-- Edit button -->
+    <button onclick="editCurrentGame()" class="absolute top-4 right-28 z-[110] p-2 rounded-full bg-surface-container-lowest/60 text-primary-container hover:bg-primary-container/20 transition-colors" title="Edit game">
+      <span class="material-symbols-outlined">edit</span>
+    </button>
     <!-- Delete button -->
     <button onclick="deleteCurrentGame()" class="absolute top-4 right-16 z-[110] p-2 rounded-full bg-surface-container-lowest/60 text-error hover:bg-error-container/40 transition-colors" title="Delete game">
       <span class="material-symbols-outlined">delete</span>
@@ -265,6 +268,15 @@ textarea.form-input { resize:vertical; min-height:80px; }
                 <span class="font-label-caps text-label-caps text-secondary">STC</span>
               </div>
             </div>
+          </section>
+
+          <!-- Screenshots -->
+          <section id="dScreenshotsSection" class="hidden">
+            <div class="flex items-center gap-3 mb-4">
+              <span class="material-symbols-outlined text-primary-container">photo_library</span>
+              <h3 class="font-headline-md text-headline-md text-on-surface">Screenshots</h3>
+            </div>
+            <div id="dScreenshots" class="grid grid-cols-2 md:grid-cols-3 gap-3"></div>
           </section>
         </main>
       </div>
@@ -378,6 +390,13 @@ textarea.form-input { resize:vertical; min-height:80px; }
         <label class="form-label">Opinion / Review</label>
         <textarea id="addOpinion" class="form-input" placeholder="What did you think? What made this game special (or not)?"></textarea>
       </div>
+
+      <!-- Step 4: Screenshots -->
+      <div class="bg-surface-container rounded-xl p-5 border border-outline-variant/20">
+        <h3 class="font-headline-md text-[16px] text-primary mb-1">Step 4: Screenshots (Optional)</h3>
+        <p class="text-[13px] text-outline mb-4">Paste image URLs, one per line. Use Imgur, Steam screenshots, or any direct image link.</p>
+        <textarea id="addScreenshots" class="form-input" placeholder="https://i.imgur.com/example1.jpg&#10;https://i.imgur.com/example2.jpg" style="min-height:60px"></textarea>
+      </div>
     </div>
 
     <!-- Footer -->
@@ -414,17 +433,20 @@ function loadGames() {
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (stored && stored.length > 0) {
-      // Merge: stored overrides defaults by ID, plus any new additions
-      const defaultIds = new Set(DEFAULT_GAMES.map(g => g.id));
-      const storedIds = new Set(stored.map(g => g.id));
-      // Start with stored data (has user edits like favorites)
+      // Deduplicate by steamAppId — localStorage versions win over defaults
+      const storedAppIds = new Set(stored.filter(g=>g.steamAppId).map(g=>g.steamAppId));
+      const storedTitles = new Set(stored.map(g=>g.title.toLowerCase()));
       const merged = [...stored];
-      // Add any NEW defaults not yet in stored (in case we add games later)
-      DEFAULT_GAMES.forEach(dg => { if (!storedIds.has(dg.id)) merged.push(dg); });
+      // Add any NEW defaults not in stored (by steamAppId or title)
+      DEFAULT_GAMES.forEach(dg => {
+        const dupById = dg.steamAppId && storedAppIds.has(dg.steamAppId);
+        const dupByTitle = storedTitles.has(dg.title.toLowerCase());
+        if (!dupById && !dupByTitle) merged.push({...dg});
+      });
       return merged;
     }
-    return DEFAULT_GAMES.map(g => ({...g}));
-  } catch { return DEFAULT_GAMES.map(g => ({...g})); }
+    return DEFAULT_GAMES.map(g => ({...g, screenshots: g.screenshots||[]}));
+  } catch { return DEFAULT_GAMES.map(g => ({...g, screenshots: g.screenshots||[]})); }
 }
 function saveGames(g) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(g));
@@ -563,6 +585,14 @@ function openDetail(id) {
   const opSec = document.getElementById('dOpinionSection');
   if(g.opinion) { opSec.classList.remove('hidden'); document.getElementById('dOpinion').textContent=g.opinion; }
   else { opSec.classList.add('hidden'); }
+  // Screenshots
+  const ssSec = document.getElementById('dScreenshotsSection');
+  const ssGrid = document.getElementById('dScreenshots');
+  const ss = g.screenshots||[];
+  if(ss.length>0) {
+    ssSec.classList.remove('hidden');
+    ssGrid.innerHTML = ss.map(url=>`<div class="group relative aspect-video bg-surface-container-highest rounded-lg border border-outline-variant/30 overflow-hidden cursor-pointer neon-border-glow transition-all"><img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src="${url}" alt="Screenshot" loading="lazy"/></div>`).join('');
+  } else { ssSec.classList.add('hidden'); }
   document.getElementById('dFavIcon').textContent=g.favorite?'favorite':'favorite_border';
   document.getElementById('dFavIcon').style.fontVariationSettings=g.favorite?"'FILL' 1":"'FILL' 0";
   document.getElementById('dFavIcon').className=`material-symbols-outlined text-[18px] ${g.favorite?'text-secondary':''}`;
@@ -578,6 +608,28 @@ function closeDetail(e) {
 function toggleFav() {
   if(!currentGame) return; currentGame.favorite=!currentGame.favorite; saveGames(games); openDetail(currentGame.id); renderGrid();
 }
+function editCurrentGame() {
+  if(!currentGame) return;
+  closeDetail();
+  setTimeout(()=>{
+    editingGameId = currentGame.id;
+    const g = currentGame;
+    document.getElementById('addSteamId').value = g.steamAppId||'';
+    document.getElementById('addTitle').value = g.title;
+    document.getElementById('addGenre').value = g.genre;
+    document.getElementById('addPlatform').value = g.platform||'PC';
+    document.getElementById('addHours').value = g.hours||0;
+    document.getElementById('addRating').value = g.rating||8;
+    document.getElementById('addStatus').value = g.status||'Completed';
+    document.getElementById('addTags').value = (g.tags||[]).join(', ');
+    document.getElementById('addOpinion').value = g.opinion||'';
+    document.getElementById('addScreenshots').value = (g.screenshots||[]).join('\n');
+    if(g.steamAppId) previewSteam();
+    // Update modal title
+    document.querySelector('#addModal h2').textContent = 'Edit Game';
+    const m=document.getElementById('addModal'); m.classList.remove('hidden'); requestAnimationFrame(()=>m.classList.add('visible')); document.body.style.overflow='hidden';
+  }, 350);
+}
 function deleteCurrentGame() {
   if(!currentGame) return;
   if(!confirm(`Remove "${currentGame.title}" from your collection?`)) return;
@@ -588,8 +640,10 @@ function deleteCurrentGame() {
 // ADD GAME MODAL
 // ══════════════════════════════════════════
 let previewTimeout;
+let editingGameId = null;
 function openAddGame() {
-  ['addSteamId','addTitle','addHours','addRating','addTags','addOpinion'].forEach(id=>document.getElementById(id).value='');
+  editingGameId = null;
+  ['addSteamId','addTitle','addHours','addRating','addTags','addOpinion','addScreenshots'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('addGenre').selectedIndex=0;
   document.getElementById('addPlatform').selectedIndex=0;
   document.getElementById('addStatus').selectedIndex=0;
@@ -597,26 +651,25 @@ function openAddGame() {
   document.getElementById('addPosterPreview').innerHTML='<span class="text-outline text-[13px]">Enter App ID to preview</span>';
   document.getElementById('addHeaderPreview').className='steam-preview aspect-video';
   document.getElementById('addHeaderPreview').innerHTML='<span class="text-outline text-[13px]">Enter App ID to preview</span>';
+  document.querySelector('#addModal h2').textContent = 'Add Game';
   const m=document.getElementById('addModal'); m.classList.remove('hidden'); requestAnimationFrame(()=>m.classList.add('visible')); document.body.style.overflow='hidden';
 }
 function closeAdd(e) {
   if(e && e.target !== e.currentTarget) return;
+  editingGameId = null;
   const m=document.getElementById('addModal'); m.classList.remove('visible'); setTimeout(()=>{m.classList.add('hidden');document.body.style.overflow='';},300);
 }
 function previewSteam() {
   clearTimeout(previewTimeout);
   previewTimeout = setTimeout(()=>{
     let raw = document.getElementById('addSteamId').value.trim();
-    // Extract ID from URL if pasted
     const match = raw.match(/app\/(\d+)/);
     const id = match ? match[1] : raw.replace(/\D/g,'');
     if(!id) return;
     document.getElementById('addSteamId').value = id;
-    // Poster
     const pp = document.getElementById('addPosterPreview');
     pp.className='steam-preview aspect-[3/4] loaded';
     pp.innerHTML=`<img src="${steamPoster(id)}" alt="Poster" onerror="this.parentElement.className='steam-preview aspect-[3/4]';this.parentElement.innerHTML='<span class=\\'text-error text-[13px]\\'>Invalid App ID</span>'"/>`;
-    // Header
     const hp = document.getElementById('addHeaderPreview');
     hp.className='steam-preview aspect-video loaded';
     hp.innerHTML=`<img src="${steamHeader(id)}" alt="Header" onerror="this.parentElement.className='steam-preview aspect-video';this.parentElement.innerHTML='<span class=\\'text-error text-[13px]\\'>Invalid App ID</span>'"/>`;
@@ -629,21 +682,45 @@ function saveGame() {
   if(!genre) { toast('Please select a genre','error'); return; }
   const rating = parseFloat(document.getElementById('addRating').value)||8;
   const steamId = document.getElementById('addSteamId').value.trim().replace(/\D/g,'');
-  const game = {
-    id: Date.now(),
-    title, genre,
-    steamAppId: steamId ? parseInt(steamId) : null,
-    hours: parseInt(document.getElementById('addHours').value)||0,
-    rating: Math.min(10,Math.max(1,rating)),
-    ratingTier: getTier(rating),
-    platform: document.getElementById('addPlatform').value,
-    status: document.getElementById('addStatus').value,
-    favorite: false,
-    tags: document.getElementById('addTags').value.split(',').map(t=>t.trim()).filter(Boolean),
-    opinion: document.getElementById('addOpinion').value.trim(),
-    gradient: getGradient(genre)
-  };
-  games.push(game); saveGames(games); closeAdd(); renderFilters(); renderGrid(); toast(`${title} added to your vault!`);
+  const screenshots = document.getElementById('addScreenshots').value.split('\n').map(s=>s.trim()).filter(s=>s.startsWith('http'));
+
+  if (editingGameId) {
+    // EDIT existing game
+    const idx = games.findIndex(g=>g.id===editingGameId);
+    if(idx!==-1) {
+      games[idx].title = title;
+      games[idx].genre = genre;
+      games[idx].steamAppId = steamId ? parseInt(steamId) : games[idx].steamAppId;
+      games[idx].hours = parseInt(document.getElementById('addHours').value)||0;
+      games[idx].rating = Math.min(10,Math.max(1,rating));
+      games[idx].ratingTier = getTier(rating);
+      games[idx].platform = document.getElementById('addPlatform').value;
+      games[idx].status = document.getElementById('addStatus').value;
+      games[idx].tags = document.getElementById('addTags').value.split(',').map(t=>t.trim()).filter(Boolean);
+      games[idx].opinion = document.getElementById('addOpinion').value.trim();
+      games[idx].gradient = getGradient(genre);
+      games[idx].screenshots = screenshots;
+    }
+    saveGames(games); closeAdd(); renderFilters(); renderGrid(); toast(`${title} updated!`);
+  } else {
+    // ADD new game
+    const game = {
+      id: Date.now(), title, genre,
+      steamAppId: steamId ? parseInt(steamId) : null,
+      hours: parseInt(document.getElementById('addHours').value)||0,
+      rating: Math.min(10,Math.max(1,rating)),
+      ratingTier: getTier(rating),
+      platform: document.getElementById('addPlatform').value,
+      status: document.getElementById('addStatus').value,
+      favorite: false,
+      tags: document.getElementById('addTags').value.split(',').map(t=>t.trim()).filter(Boolean),
+      opinion: document.getElementById('addOpinion').value.trim(),
+      gradient: getGradient(genre),
+      screenshots: screenshots
+    };
+    games.push(game); saveGames(games); closeAdd(); renderFilters(); renderGrid(); toast(`${title} added to your vault!`);
+  }
+  editingGameId = null;
 }
 
 // ══════════════════════════════════════════
